@@ -48,6 +48,26 @@ add_subdirectory(pybind11)
 # vulkan-headers
 add_subdirectory(vulkan-headers)
 
+# -----------------------------------------------------------------------------
+# Dependencies in CPM
+# -----------------------------------------------------------------------------
+if(FALCOR_HAS_CUDA)
+    message(STATUS "Configure tiny-cuda-nn")
+
+    CPMAddPackage(
+        NAME                   tcnn
+        GIT_REPOSITORY         https://github.com/Hyiker/tiny-cuda-nn
+        GIT_TAG                "27cd4ea13e05f20e833c02a01af957286c2340f7"
+        GIT_SUBMODULES_RECURSE TRUE
+        OPTIONS
+        "TCNN_BUILD_BENCHMARK OFF"
+        "TCNN_BUILD_EXAMPLES OFF"
+        "TCNN_ALLOW_CUBLAS_CUSOLVER OFF"
+        "TCNN_USE_DEPSFMT OFF"
+        "TCNN_CUDA_ARCHITECTURES 86"
+        "TCNN_EXTERNAL_FMT fmt"
+    )
+endif()
 
 # -----------------------------------------------------------------------------
 # Dependencies in local files
@@ -187,24 +207,6 @@ elseif(FALCOR_LINUX)
         IMPORTED_LOCATION_RELEASE ${FALCOR_DEPS_DIR}/lib/libopenvdb.so
         IMPORTED_LOCATION_DEBUG ${FALCOR_DEPS_DIR}/debug/lib/libopenvdb.so
         INTERFACE_LINK_LIBRARIES "tbb;blosc"
-    )
-endif()
-
-# assimp
-# Note: For better performance in Debug builds we always use the release version.
-if(FALCOR_WINDOWS)
-    add_library(assimp SHARED IMPORTED GLOBAL)
-    set_target_properties(assimp PROPERTIES
-        INTERFACE_INCLUDE_DIRECTORIES ${FALCOR_DEPS_DIR}/include
-        IMPORTED_IMPLIB ${FALCOR_DEPS_DIR}/lib/assimp-vc143-mt.lib
-        IMPORTED_LOCATION ${FALCOR_DEPS_DIR}/bin/assimp-vc143-mt.dll
-    )
-elseif(FALCOR_LINUX)
-    add_library(assimp SHARED IMPORTED GLOBAL)
-    set_target_properties(assimp PROPERTIES
-        INTERFACE_INCLUDE_DIRECTORIES ${FALCOR_DEPS_DIR}/include
-        IMPORTED_LOCATION_RELEASE ${FALCOR_DEPS_DIR}/lib/libassimp.so
-        IMPORTED_LOCATION_DEBUG ${FALCOR_DEPS_DIR}/debug/lib/libassimpd.so
     )
 endif()
 
@@ -514,6 +516,27 @@ elseif(FALCOR_LINUX)
         IMPORTED_LOCATION ${NVTT_DIR}/libnvtt.so
         IMPORTED_NO_SONAME TRUE
     )
+endif()
+
+# assimp
+set(ASSIMP_DIR ${PACKMAN_DIR}/assimp)
+
+# assimp
+if(FALCOR_WINDOWS)
+    add_library(assimp SHARED IMPORTED GLOBAL)
+    set_target_properties(assimp PROPERTIES
+        INTERFACE_INCLUDE_DIRECTORIES ${ASSIMP_DIR}/include
+        IMPORTED_IMPLIB ${ASSIMP_DIR}/lib/assimp-vc143-mt.lib
+        IMPORTED_LOCATION ${ASSIMP_DIR}/bin/assimp-vc143-mt.dll
+    )
+elseif(FALCOR_LINUX)
+    message(FATAL_ERROR "assimp is not currently supported on Linux. Please build it from source and create the appropriate imported target here.")
+    # add_library(assimp SHARED IMPORTED GLOBAL)
+    # set_target_properties(assimp PROPERTIES
+    #     INTERFACE_INCLUDE_DIRECTORIES ${ASSIMP_DIR}/include
+    #     IMPORTED_LOCATION_RELEASE ${ASSIMP_DIR}/lib/libassimp.so
+    #     IMPORTED_LOCATION_DEBUG ${ASSIMP_DIR}/debug/lib/libassimpd.so
+    # )
 endif()
 
 # agility-sdk

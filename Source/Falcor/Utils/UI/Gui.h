@@ -692,7 +692,7 @@ public:
     /**
      * Add a font
      */
-    void addFont(const std::string& name, const std::filesystem::path& path);
+    void addFont(const std::string& name, const std::filesystem::path& path, bool isChineseFont = false);
 
     /**
      * Set the active font

@@ -24,6 +24,10 @@
     <dependency name="slang" linkPath="external/packman/slang">
         <package name="slang" version="2024.1.34" remotes="github-slang" platforms="windows-x86_64 linux-x86_64"/>
     </dependency>
+    <remote name="github-assimp-windows" type="https" packageLocation="github.com/Hyiker/assimp/releases/download/v${version}/windows-x64.zip"/>
+    <dependency name="assimp" linkPath="external/packman/assimp">
+        <package name="assimp" version="5.4.3-prebuild" remotes="github-assimp-windows" platforms="windows-x86_64"/>
+    </dependency>
     <dependency name="pix" linkPath="external/packman/pix">
         <package name="WinPixEventRuntime" version="1.0.190604001" platforms="windows-x86_64" />
     </dependency>
