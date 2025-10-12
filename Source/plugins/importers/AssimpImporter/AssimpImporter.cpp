@@ -919,6 +919,13 @@ ref<Material> createMaterial(
         pMaterial->setEmissiveColor(emissive);
     }
 
+    // Emissive factor
+    float emissiveFactor;
+    if (pAiMaterial->Get(AI_MATKEY_EMISSIVE_INTENSITY, emissiveFactor) == AI_SUCCESS)
+    {
+        pMaterial->setEmissiveFactor(emissiveFactor);
+    }
+
     // Double-Sided
     int isDoubleSided;
     if (pAiMaterial->Get(AI_MATKEY_TWOSIDED, isDoubleSided) == AI_SUCCESS)

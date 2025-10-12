@@ -102,6 +102,9 @@ execute_process(
 # Misc
 # -----------------------------------------------------------------------------
 
+# CPM third party package manager
+include(CPM)
+
 # Setup workaround for re-running mt.exe when it fails due to a race condition with AV software.
 include(mt-retry)
 

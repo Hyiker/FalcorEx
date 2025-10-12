@@ -1193,6 +1193,7 @@ Gui::Gui(ref<Device> pDevice, uint32_t width, uint32_t height, float scaleFactor
 
     // Add the default font
     addFont("", getRuntimeDirectory() / "data/framework/fonts/trebucbd.ttf");
+    addFont("", getRuntimeDirectory() / "data/framework/fonts/notosans.ttf", true);
     addFont("monospace", getRuntimeDirectory() / "data/framework/fonts/consolab.ttf");
     setActiveFont("");
 
@@ -1219,10 +1220,25 @@ float4 Gui::pickUniqueColor(const std::string& key)
     return float4(color.i32[0] % 1000 / 2000.0f, color.i32[1] % 1000 / 2000.0f, (color.i32[0] * color.i32[1]) % 1000 / 2000.0f, 1.0f);
 }
 
-void Gui::addFont(const std::string& name, const std::filesystem::path& path)
+void Gui::addFont(const std::string& name, const std::filesystem::path& path, bool isChineseFont)
 {
     float size = 14.0f * mpWrapper->mScaleFactor;
-    ImFont* pFont = ImGui::GetIO().Fonts->AddFontFromFileTTF(path.string().c_str(), size);
+    auto* fonts = ImGui::GetIO().Fonts;
+
+    ImFont* pFont = nullptr;
+
+    if (isChineseFont)
+    {
+        ImFontConfig config;
+        config.MergeMode = true;
+        static const ImWchar ranges[] = {0x4E00, 0x9FFF, 0};
+
+        pFont = fonts->AddFontFromFileTTF(path.string().c_str(), size / 14.f * 16.f, &config, ranges);
+    }
+    else
+    {
+        pFont = fonts->AddFontFromFileTTF(path.string().c_str(), size);
+    }
     if (!pFont)
         FALCOR_THROW("Failed to load font from '{}'.", path);
     mpWrapper->mFontMap[name] = pFont;

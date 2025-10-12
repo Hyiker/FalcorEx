@@ -21,7 +21,7 @@ if %IsDebug% EQU 0 (
     robocopy %ExtDir%\deps\bin\ %OutDir% /E /r:0 >nul
 ) else (
     robocopy %ExtDir%\deps\debug\bin\ %OutDir% /E /r:0 >nul
-    robocopy %ExtDir%\deps\bin\ %OutDir% assimp-vc143-mt.* /r:0 >nul
+    robocopy %ExtDir%\assimp\bin\ %OutDir% assimp-vc143-mt.* /r:0 >nul
     rem Needed for OpenVDB (debug version links to release version of Half_2.5)
     robocopy %ExtDir%\deps\bin\ %OutDir% Half-2_5.* /r:0 >nul
 )
@@ -37,6 +37,7 @@ robocopy %ExtDir%\cuda\bin\ %OutDir% cudart*.dll /r:0 >nul
 robocopy %ExtDir%\cuda\bin\ %OutDir% nvrtc*.dll /r:0 >nul
 robocopy %ExtDir%\cuda\bin\ %OutDir% cublas*.dll /r:0 >nul
 robocopy %ExtDir%\cuda\bin\ %OutDir% curand*.dll /r:0 >nul
+robocopy %ExtDir%\assimp\bin\ %OutDir% assimp*.dll /r:0 >nul
 
 rem Copy Aftermath
 set AftermathDir=%ExtDir%\aftermath
