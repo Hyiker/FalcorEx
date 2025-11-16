@@ -35,9 +35,128 @@
 #include <assimp/scene.h>
 #include <assimp/postprocess.h>
 #include <cmath>
+#include <rply/rply.h>
 
 namespace Falcor
 {
+
+void rply_message_callback(p_ply ply, const char *message) {
+    logWarning("rply: {}", message);
+}
+
+int vertex_x_cb(p_ply_argument argument) {
+    TriangleMesh::VertexList* vertices;
+    ply_get_argument_user_data(argument, (void**)&vertices, nullptr);
+    long index;
+    ply_get_argument_element(argument, nullptr, &index);
+    (*vertices)[index].position.x = (float)ply_get_argument_value(argument);
+    return 1;
+}
+
+int vertex_y_cb(p_ply_argument argument) {
+    TriangleMesh::VertexList* vertices;
+    ply_get_argument_user_data(argument, (void**)&vertices, nullptr);
+    long index;
+    ply_get_argument_element(argument, nullptr, &index);
+    (*vertices)[index].position.y = (float)ply_get_argument_value(argument);
+    return 1;
+}
+
+int vertex_z_cb(p_ply_argument argument) {
+    TriangleMesh::VertexList* vertices;
+    ply_get_argument_user_data(argument, (void**)&vertices, nullptr);
+    long index;
+    ply_get_argument_element(argument, nullptr, &index);
+    (*vertices)[index].position.z = (float)ply_get_argument_value(argument);
+    return 1;
+}
+
+int normal_x_cb(p_ply_argument argument) {
+    TriangleMesh::VertexList* vertices;
+    ply_get_argument_user_data(argument, (void**)&vertices, nullptr);
+    long index;
+    ply_get_argument_element(argument, nullptr, &index);
+    (*vertices)[index].normal.x = (float)ply_get_argument_value(argument);
+    return 1;
+}
+
+int normal_y_cb(p_ply_argument argument) {
+    TriangleMesh::VertexList* vertices;
+    ply_get_argument_user_data(argument, (void**)&vertices, nullptr);
+    long index;
+    ply_get_argument_element(argument, nullptr, &index);
+    (*vertices)[index].normal.y = (float)ply_get_argument_value(argument);
+    return 1;
+}
+
+int normal_z_cb(p_ply_argument argument) {
+    TriangleMesh::VertexList* vertices;
+    ply_get_argument_user_data(argument, (void**)&vertices, nullptr);
+    long index;
+    ply_get_argument_element(argument, nullptr, &index);
+    (*vertices)[index].normal.z = (float)ply_get_argument_value(argument);
+    return 1;
+}
+
+int texcoord_u_cb(p_ply_argument argument) {
+    TriangleMesh::VertexList* vertices;
+    ply_get_argument_user_data(argument, (void**)&vertices, nullptr);
+    long index;
+    ply_get_argument_element(argument, nullptr, &index);
+    (*vertices)[index].texCoord.x = (float)ply_get_argument_value(argument);
+    return 1;
+}
+
+int texcoord_v_cb(p_ply_argument argument) {
+    TriangleMesh::VertexList* vertices;
+    ply_get_argument_user_data(argument, (void**)&vertices, nullptr);
+    long index;
+    ply_get_argument_element(argument, nullptr, &index);
+    (*vertices)[index].texCoord.y = (float)ply_get_argument_value(argument);
+    return 1;
+}
+
+struct FaceCallbackData {
+    TriangleMesh::IndexList* indices = nullptr;
+    std::vector<uint32_t> face_vertices;
+};
+
+int face_cb(p_ply_argument argument) {
+    FaceCallbackData* context;
+    ply_get_argument_user_data(argument, (void**)&context, nullptr);
+
+    long length, value_index;
+    ply_get_argument_property(argument, nullptr, &length, &value_index);
+
+    if (value_index < 0) {
+        context->face_vertices.clear();
+        if (length == 3 || length == 4) {
+            context->face_vertices.reserve(length);
+        }
+        return 1;
+    }
+
+    context->face_vertices.push_back((uint32_t)ply_get_argument_value(argument));
+
+    if (value_index == length - 1) {
+        if (length == 3) {
+            context->indices->push_back(context->face_vertices[0]);
+            context->indices->push_back(context->face_vertices[1]);
+            context->indices->push_back(context->face_vertices[2]);
+        } else if (length == 4) {
+            context->indices->push_back(context->face_vertices[0]);
+            context->indices->push_back(context->face_vertices[1]);
+            context->indices->push_back(context->face_vertices[2]);
+
+            context->indices->push_back(context->face_vertices[0]);
+            context->indices->push_back(context->face_vertices[2]);
+            context->indices->push_back(context->face_vertices[3]);
+        }
+    }
+
+    return 1;
+}
+
     ref<TriangleMesh> TriangleMesh::create()
     {
         return ref<TriangleMesh>(new TriangleMesh());
@@ -193,22 +312,18 @@ namespace Falcor
         return create(vertices, indices);
     }
 
-    ref<TriangleMesh> TriangleMesh::createFromFile(const std::filesystem::path& path, ImportFlags importFlags)
+    static bool importWithAssimp(
+        const std::filesystem::path& path,
+        TriangleMesh::ImportFlags importFlags,
+        TriangleMesh::VertexList& vertices,
+        TriangleMesh::IndexList& indices
+    )
     {
-        if (!std::filesystem::exists(path))
-        {
-            logWarning("Failed to load triangle mesh from '{}': File not found", path);
-            return nullptr;
-        }
-
         Assimp::Importer importer;
 
-        unsigned int flags =
-            aiProcess_FlipUVs |
-            aiProcess_Triangulate |
-            aiProcess_PreTransformVertices;
-        flags |= is_set(importFlags, ImportFlags::GenSmoothNormals) ? aiProcess_GenSmoothNormals : aiProcess_GenNormals;
-        flags |= is_set(importFlags, ImportFlags::JoinIdenticalVertices) ? aiProcess_JoinIdenticalVertices : 0;
+        unsigned int flags = aiProcess_FlipUVs | aiProcess_Triangulate | aiProcess_PreTransformVertices;
+        flags |= is_set(importFlags, TriangleMesh::ImportFlags::GenSmoothNormals) ? aiProcess_GenSmoothNormals : aiProcess_GenNormals;
+        flags |= is_set(importFlags, TriangleMesh::ImportFlags::JoinIdenticalVertices) ? aiProcess_JoinIdenticalVertices : 0;
 
         const aiScene* scene = nullptr;
 
@@ -225,11 +340,8 @@ namespace Falcor
         if (!scene)
         {
             logWarning("Failed to load triangle mesh from '{}': {}", path, importer.GetErrorString());
-            return nullptr;
+            return false;
         }
-
-        VertexList vertices;
-        IndexList indices;
 
         size_t vertexCount = 0;
         size_t indexCount = 0;
@@ -252,11 +364,8 @@ namespace Falcor
                 const auto& vertex = mesh->mVertices[vertexIdx];
                 const auto& normal = mesh->mNormals[vertexIdx];
                 const auto& texCoord = mesh->mTextureCoords[0] ? mesh->mTextureCoords[0][vertexIdx] : aiVector3D(0.f);
-                vertices.emplace_back(Vertex{
-                    float3(vertex.x, vertex.y, vertex.z),
-                    float3(normal.x, normal.y, normal.z),
-                    float2(texCoord.x, texCoord.y)
-                });
+                vertices.emplace_back(TriangleMesh::Vertex{
+                    float3(vertex.x, vertex.y, vertex.z), float3(normal.x, normal.y, normal.z), float2(texCoord.x, texCoord.y)});
             }
             for (size_t faceIdx = 0; faceIdx < mesh->mNumFaces; ++faceIdx)
             {
@@ -264,10 +373,171 @@ namespace Falcor
                 if (face.mNumIndices != 3)
                 {
                     logWarning("Failed to load triangle mesh from '{}': Broken face data", path);
-                    return nullptr;
+                    return false;
                 }
-                for (size_t i = 0; i < 3; ++i) indices.emplace_back((uint32_t)(indexBase + face.mIndices[i]));
+                for (size_t i = 0; i < 3; ++i)
+                    indices.emplace_back((uint32_t)(indexBase + face.mIndices[i]));
             }
+        }
+
+        return true;
+    }
+
+    void generateNormals(TriangleMesh::VertexList& vertices, const TriangleMesh::IndexList& indices)
+    {
+        for (auto& v : vertices)
+        {
+            v.normal = {0.0f, 0.0f, 0.0f};
+        }
+
+        for (size_t i = 0; i < indices.size(); i += 3)
+        {
+            uint32_t i0 = indices[i];
+            uint32_t i1 = indices[i + 1];
+            uint32_t i2 = indices[i + 2];
+
+            const float3& p0 = vertices[i0].position;
+            const float3& p1 = vertices[i1].position;
+            const float3& p2 = vertices[i2].position;
+
+            float3 edge1 = {p1.x - p0.x, p1.y - p0.y, p1.z - p0.z};
+            float3 edge2 = {p2.x - p0.x, p2.y - p0.y, p2.z - p0.z};
+
+            float3 faceNormal = cross(edge1, edge2);
+
+            vertices[i0].normal.x += faceNormal.x;
+            vertices[i0].normal.y += faceNormal.y;
+            vertices[i0].normal.z += faceNormal.z;
+
+            vertices[i1].normal.x += faceNormal.x;
+            vertices[i1].normal.y += faceNormal.y;
+            vertices[i1].normal.z += faceNormal.z;
+
+            vertices[i2].normal.x += faceNormal.x;
+            vertices[i2].normal.y += faceNormal.y;
+            vertices[i2].normal.z += faceNormal.z;
+        }
+
+        for (auto& v : vertices)
+        {
+            v.normal = normalize(v.normal);
+        }
+    }
+
+    static bool importWithRply(const std::filesystem::path& path, TriangleMesh::VertexList& vertices, TriangleMesh::IndexList& indices)
+    {
+        p_ply ply = ply_open(path.string().c_str(), rply_message_callback, 0, nullptr);
+        if (!ply)
+        {
+            logWarning("Failed to open PLY file '{}'", path);
+            return false;
+        }
+
+        if (ply_read_header(ply) == 0)
+        {
+            logWarning("Failed to read header of PLY file '{}'", path);
+            ply_close(ply);
+            return false;
+        }
+
+        p_ply_element element = nullptr;
+        long vertexCount = 0, faceCount = 0;
+
+        while ((element = ply_get_next_element(ply, element)) != nullptr)
+        {
+            const char* name;
+            long nInstances;
+            ply_get_element_info(element, &name, &nInstances);
+            if (strcmp(name, "vertex") == 0)
+            {
+                vertexCount = nInstances;
+            }
+            else if (strcmp(name, "face") == 0)
+            {
+                faceCount = nInstances;
+            }
+        }
+
+        if (vertexCount == 0)
+        {
+            logWarning("PLY file '{}' has no vertex elements.", path);
+            ply_close(ply);
+            return false;
+        }
+
+        vertices.resize(vertexCount);
+        if (faceCount > 0)
+        {
+            indices.reserve(faceCount * 2 * 3);
+        }
+
+        if (ply_set_read_cb(ply, "vertex", "x", vertex_x_cb, &vertices, 0) == 0 ||
+            ply_set_read_cb(ply, "vertex", "y", vertex_y_cb, &vertices, 0) == 0 ||
+            ply_set_read_cb(ply, "vertex", "z", vertex_z_cb, &vertices, 0) == 0)
+        {
+            logError("PLY file '{}' does not contain vertex positions (x, y, z).", path);
+            ply_close(ply);
+            return false;
+        }
+
+        bool has_normals = ply_set_read_cb(ply, "vertex", "nx", normal_x_cb, &vertices, 0) != 0 &&
+                           ply_set_read_cb(ply, "vertex", "ny", normal_y_cb, &vertices, 0) != 0 &&
+                           ply_set_read_cb(ply, "vertex", "nz", normal_z_cb, &vertices, 0) != 0;
+
+        bool has_uvs = (ply_set_read_cb(ply, "vertex", "u", texcoord_u_cb, &vertices, 0) != 0 &&
+                        ply_set_read_cb(ply, "vertex", "v", texcoord_v_cb, &vertices, 0) != 0) ||
+                       (ply_set_read_cb(ply, "vertex", "s", texcoord_u_cb, &vertices, 0) != 0 &&
+                        ply_set_read_cb(ply, "vertex", "t", texcoord_v_cb, &vertices, 0) != 0) ||
+                       (ply_set_read_cb(ply, "vertex", "texture_u", texcoord_u_cb, &vertices, 0) != 0 &&
+                        ply_set_read_cb(ply, "vertex", "texture_v", texcoord_v_cb, &vertices, 0) != 0);
+
+        FaceCallbackData face_context;
+        face_context.indices = &indices;
+        if (faceCount > 0)
+        {
+            if (ply_set_read_cb(ply, "face", "vertex_indices", face_cb, &face_context, 0) == 0)
+            {
+                logWarning("PLY file '{}' has face elements but no 'vertex_indices' property.", path);
+            }
+        }
+
+        if (ply_read(ply) == 0)
+        {
+            logError("Failed to read the contents of PLY file '{}'", path);
+            ply_close(ply);
+            return false;
+        }
+
+        ply_close(ply);
+
+        if (!has_normals && !indices.empty()) {
+        generateNormals(vertices, indices);
+    }
+
+        return true;
+    }
+
+    ref<TriangleMesh> TriangleMesh::createFromFile(const std::filesystem::path& path, ImportFlags importFlags)
+    {
+        if (!std::filesystem::exists(path))
+        {
+            logWarning("Failed to load triangle mesh from '{}': File not found", path);
+            return nullptr;
+        }
+
+        VertexList vertices;
+        IndexList indices;
+
+        if (hasExtension(path, "ply"))
+        {
+            if (!importWithRply(path, vertices, indices))
+            {
+                return nullptr;
+            }
+        }
+        else if (!importWithAssimp(path, importFlags, vertices, indices))
+        {
+            return nullptr;
         }
 
         return create(vertices, indices);

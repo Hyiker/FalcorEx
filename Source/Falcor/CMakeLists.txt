@@ -811,6 +811,12 @@ target_sources(Falcor PRIVATE
     ../../external/imgui_addons/imguinodegrapheditor/imguinodegrapheditor.cpp
 )
 
+# rply source files
+target_sources(Falcor PRIVATE
+    ../../external/rply/rply/rply.h
+    ../../external/rply/rply/rply.cpp
+)
+
 target_copy_shaders(Falcor .)
 
 target_compile_features(Falcor
@@ -976,7 +982,7 @@ target_link_libraries(Falcor
     PUBLIC
         fmt pybind11::embed Vulkan::Headers
         slang slang-gfx
-        imgui imgui_addons
+        imgui imgui_addons rply
         nanovdb
         external_includes
         rtxdi
