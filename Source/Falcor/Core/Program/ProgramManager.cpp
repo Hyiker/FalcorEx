@@ -755,6 +755,9 @@ SlangCompileRequest* ProgramManager::createSlangCompileRequest(const Program& pr
     addStringOption(slang::CompilerOptionName::DisableWarning, "30056"); // non-short-circuiting `?:` operator is deprecated, use 'select'
                                                                          // instead
     addStringOption(slang::CompilerOptionName::DisableWarning, "30081"); // implicit conversion
+    addStringOption(slang::CompilerOptionName::DisableWarning, "41012"); // implicit nv extensions enabled
+    addStringOption(slang::CompilerOptionName::DisableWarning, "41016"); // use of uninitialized variable
+    addStringOption(slang::CompilerOptionName::DisableWarning, "41021"); // uninitialized variable of struct
     addStringOption(slang::CompilerOptionName::DisableWarning, "41203"); // reinterpret<> into not equally sized types
 
     sessionDesc.compilerOptionEntries = compilerOptionEntries.data();

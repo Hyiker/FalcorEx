@@ -85,6 +85,10 @@ set_target_properties(mikktspace PROPERTIES
 add_library(imgui_addons INTERFACE)
 target_include_directories(imgui_addons INTERFACE imgui_addons)
 
+# rply
+add_library(rply INTERFACE)
+target_include_directories(rply INTERFACE rply)
+
 # external_includes
 add_library(external_includes INTERFACE)
 target_include_directories(external_includes INTERFACE include)
