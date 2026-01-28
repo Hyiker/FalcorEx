@@ -56,6 +56,7 @@ bool sampleTriangle(const float3 posW, const uint triangleIndex, const float2 u,
     ls = {};
     ls.triangleIndex = triangleIndex;
     const EmissiveTriangle tri = gScene.lightCollection.getTriangle(triangleIndex);
+    MaterialHeader mh = gScene.materials.getMaterialHeader(tri.materialID);
 
     // Sample the triangle uniformly.
     const float3 barycentrics = sample_triangle(u);
@@ -72,6 +73,7 @@ bool sampleTriangle(const float3 posW, const uint triangleIndex, const float2 u,
 
     // Reject sample if triangle is back-facing.
     float cosTheta = dot(ls.normalW, -ls.dir);
+    cosTheta = mh.isDoubleSided() ? abs(cosTheta) : cosTheta;
     if (cosTheta <= 0.f) return false;
 
     // Evaluate emitted radiance.
