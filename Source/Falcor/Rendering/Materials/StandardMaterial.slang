@@ -119,7 +119,7 @@ struct StandardMaterial : MaterialBase, IMaterial
         // The standard material supports uniform emission over the hemisphere.
         // Note that the material is only emissive on the front-facing side.
         float3 emission = {};
-        if (sd.frontFacing)
+        if (sd.frontFacing || header.isDoubleSided())
         {
             emission = ms.sampleTexture(data.texEmissive, s, sd.uv, float4(data.emissive, 1), lod).rgb * data.emissiveFactor;
         }
