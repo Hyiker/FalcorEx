@@ -1,3 +1,4 @@
+add_subdirectory(Benchmark)
 add_subdirectory(CudaInterop)
 add_subdirectory(HelloDXR)
 add_subdirectory(MultiSampling)
