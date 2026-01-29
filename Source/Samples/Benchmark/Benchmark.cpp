@@ -26,27 +26,26 @@
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 #include "Benchmark.h"
+#include "Utils/Math/FalcorMath.h"
+#include "Utils/UI/TextRenderer.h"
 
 FALCOR_EXPORT_D3D12_AGILITY_SDK
 
-uint32_t mSampleGuiWidth = 250;
-uint32_t mSampleGuiHeight = 200;
-uint32_t mSampleGuiPositionX = 20;
-uint32_t mSampleGuiPositionY = 40;
+static const float4 kClearColor(0.38f, 0.52f, 0.10f, 1);
+static const std::string kDefaultScene = "Arcade/Arcade.pyscene";
 
-Benchmark::Benchmark(const SampleAppConfig& config) : SampleApp(config)
-{
-    //
-}
+Benchmark::Benchmark(const SampleAppConfig& config) : SampleApp(config) {}
 
-Benchmark::~Benchmark()
-{
-    //
-}
+Benchmark::~Benchmark() {}
 
 void Benchmark::onLoad(RenderContext* pRenderContext)
 {
-    //
+    if (getDevice()->isFeatureSupported(Device::SupportedFeatures::Raytracing) == false)
+    {
+        FALCOR_THROW("Device does not support raytracing!");
+    }
+
+    loadScene(kDefaultScene, getTargetFbo().get());
 }
 
 void Benchmark::onShutdown()
@@ -56,39 +55,160 @@ void Benchmark::onShutdown()
 
 void Benchmark::onResize(uint32_t width, uint32_t height)
 {
-    //
+    float h = (float)height;
+    float w = (float)width;
+
+    if (mpCamera)
+    {
+        mpCamera->setFocalLength(18);
+        float aspectRatio = (w / h);
+        mpCamera->setAspectRatio(aspectRatio);
+    }
+
+    mpRtOut = getDevice()->createTexture2D(
+        width, height, ResourceFormat::RGBA16Float, 1, 1, nullptr, ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource
+    );
 }
 
 void Benchmark::onFrameRender(RenderContext* pRenderContext, const ref<Fbo>& pTargetFbo)
 {
-    const float4 clearColor(0.38f, 0.52f, 0.10f, 1);
-    pRenderContext->clearFbo(pTargetFbo.get(), clearColor, 1.0f, 0, FboAttachmentType::All);
+    pRenderContext->clearFbo(pTargetFbo.get(), kClearColor, 1.0f, 0, FboAttachmentType::All);
+
+    if (mpScene)
+    {
+        IScene::UpdateFlags updates = mpScene->update(pRenderContext, getGlobalClock().getTime());
+        if (is_set(updates, IScene::UpdateFlags::GeometryChanged))
+            FALCOR_THROW("This sample does not support scene geometry changes.");
+        if (is_set(updates, IScene::UpdateFlags::RecompileNeeded))
+            FALCOR_THROW("This sample does not support scene changes that require shader recompilation.");
+
+        renderRT(pRenderContext, pTargetFbo);
+    }
+
+    getTextRenderer().render(pRenderContext, getFrameRate().getMsg(), pTargetFbo, {20, 20});
 }
 
 void Benchmark::onGuiRender(Gui* pGui)
 {
-    Gui::Window w(pGui, "Falcor", {250, 200});
-    renderGlobalUI(pGui);
-    w.text("Hello from Benchmark");
-    if (w.button("Click Here"))
+    Gui::Window w(pGui, "Hello DXR Settings", {300, 400}, {10, 80});
+
+    w.checkbox("Use Depth of Field", mUseDOF);
+    if (w.button("Load Scene"))
     {
-        msgBox("Info", "Now why would you do that?");
+        std::filesystem::path path;
+        if (openFileDialog(Scene::getFileExtensionFilters(), path))
+        {
+            loadScene(path, getTargetFbo().get());
+        }
     }
+
+    mpScene->renderUI(w);
 }
 
 bool Benchmark::onKeyEvent(const KeyboardEvent& keyEvent)
 {
+    if (keyEvent.key == Input::Key::Space && keyEvent.type == KeyboardEvent::Type::KeyPressed)
+    {
+        return true;
+    }
+
+    if (mpScene && mpScene->onKeyEvent(keyEvent))
+        return true;
+
     return false;
 }
 
 bool Benchmark::onMouseEvent(const MouseEvent& mouseEvent)
 {
-    return false;
+    return mpScene && mpScene->onMouseEvent(mouseEvent);
 }
 
-void Benchmark::onHotReload(HotReloadFlags reloaded)
+
+void Benchmark::loadScene(const std::filesystem::path& path, const Fbo* pTargetFbo)
 {
+    mpScene = Scene::create(getDevice(), path);
+    mpCamera = mpScene->getCamera();
+
+    // Update the controllers
+    float radius = mpScene->getSceneBounds().radius();
+    mpScene->setCameraSpeed(radius * 0.25f);
+    float nearZ = std::max(0.1f, radius / 750.0f);
+    float farZ = radius * 10;
+    mpCamera->setDepthRange(nearZ, farZ);
+    mpCamera->setAspectRatio((float)pTargetFbo->getWidth() / (float)pTargetFbo->getHeight());
+
+    // Get shader modules and type conformances for types used by the scene.
+    // These need to be set on the program in order to use Falcor's material system.
+    auto shaderModules = mpScene->getShaderModules();
+    auto typeConformances = mpScene->getTypeConformances();
+
+    // Get scene defines. These need to be set on any program using the scene.
+    auto defines = mpScene->getSceneDefines();
+
+    // Create raster pass.
+    // This utility wraps the creation of the program and vars, and sets the necessary scene defines.
+    ProgramDesc rasterProgDesc;
+    rasterProgDesc.addShaderModules(shaderModules);
+    rasterProgDesc.addShaderLibrary("Samples/HelloDXR/HelloDXR.3d.slang").vsEntry("vsMain").psEntry("psMain");
+    rasterProgDesc.addTypeConformances(typeConformances);
+
+    // We'll now create a raytracing program. To do that we need to setup two things:
+    // - A program description (ProgramDesc). This holds all shader entry points, compiler flags, macro defintions,
+    // etc.
+    // - A binding table (RtBindingTable). This maps shaders to geometries in the scene, and sets the ray generation and
+    // miss shaders.
     //
+    // After setting up these, we can create the Program and associated RtProgramVars that holds the variable/resource
+    // bindings. The Program can be reused for different scenes, but RtProgramVars needs to binding table which is
+    // Scene-specific and needs to be re-created when switching scene. In this example, we re-create both the program
+    // and vars when a scene is loaded.
+
+    ProgramDesc rtProgDesc;
+    rtProgDesc.addShaderModules(shaderModules);
+    rtProgDesc.addShaderLibrary("Samples/HelloDXR/HelloDXR.rt.slang");
+    rtProgDesc.addTypeConformances(typeConformances);
+    rtProgDesc.setMaxTraceRecursionDepth(3); // 1 for calling TraceRay from RayGen, 1 for calling it from the
+                                             // primary-ray ClosestHit shader for reflections, 1 for reflection ray
+                                             // tracing a shadow ray
+    rtProgDesc.setMaxPayloadSize(24);        // The largest ray payload struct (PrimaryRayData) is 24 bytes. The payload size
+                                             // should be set as small as possible for maximum performance.
+
+    ref<RtBindingTable> sbt = RtBindingTable::create(2, 2, mpScene->getGeometryCount());
+    sbt->setRayGen(rtProgDesc.addRayGen("rayGen"));
+    sbt->setMiss(0, rtProgDesc.addMiss("primaryMiss"));
+    sbt->setMiss(1, rtProgDesc.addMiss("shadowMiss"));
+    auto primary = rtProgDesc.addHitGroup("primaryClosestHit", "primaryAnyHit");
+    auto shadow = rtProgDesc.addHitGroup("", "shadowAnyHit");
+    sbt->setHitGroup(0, mpScene->getGeometryIDs(Scene::GeometryType::TriangleMesh), primary);
+    sbt->setHitGroup(1, mpScene->getGeometryIDs(Scene::GeometryType::TriangleMesh), shadow);
+
+    mpRaytraceProgram = Program::create(getDevice(), rtProgDesc, defines);
+    mpRtVars = RtProgramVars::create(getDevice(), mpRaytraceProgram, sbt);
+}
+
+void Benchmark::setPerFrameVars(const Fbo* pTargetFbo)
+{
+    auto var = mpRtVars->getRootVar();
+    var["PerFrameCB"]["invView"] = inverse(mpCamera->getViewMatrix());
+    var["PerFrameCB"]["viewportDims"] = float2(pTargetFbo->getWidth(), pTargetFbo->getHeight());
+    float fovY = focalLengthToFovY(mpCamera->getFocalLength(), Camera::kDefaultFrameHeight);
+    var["PerFrameCB"]["tanHalfFovY"] = std::tan(fovY * 0.5f);
+    var["PerFrameCB"]["sampleIndex"] = mSampleIndex++;
+    var["PerFrameCB"]["useDOF"] = mUseDOF;
+    var["gOutput"] = mpRtOut;
+}
+
+
+void Benchmark::renderRT(RenderContext* pRenderContext, const ref<Fbo>& pTargetFbo)
+{
+    FALCOR_ASSERT(mpScene);
+    FALCOR_PROFILE(pRenderContext, "renderRT");
+
+    setPerFrameVars(pTargetFbo.get());
+
+    pRenderContext->clearUAV(mpRtOut->getUAV().get(), kClearColor);
+    mpScene->raytrace(pRenderContext, mpRaytraceProgram.get(), mpRtVars, uint3(pTargetFbo->getWidth(), pTargetFbo->getHeight(), 1));
+    pRenderContext->blit(mpRtOut->getSRV(), pTargetFbo->getRenderTargetView(0));
 }
 
 int runMain(int argc, char** argv)

@@ -38,13 +38,26 @@ public:
     ~Benchmark();
 
     void onLoad(RenderContext* pRenderContext) override;
-    void onShutdown() override;
     void onResize(uint32_t width, uint32_t height) override;
     void onFrameRender(RenderContext* pRenderContext, const ref<Fbo>& pTargetFbo) override;
     void onGuiRender(Gui* pGui) override;
     bool onKeyEvent(const KeyboardEvent& keyEvent) override;
     bool onMouseEvent(const MouseEvent& mouseEvent) override;
-    void onHotReload(HotReloadFlags reloaded) override;
+    void onShutdown() override;
 
 private:
+    void loadScene(const std::filesystem::path& path, const Fbo* pTargetFbo);
+    void setPerFrameVars(const Fbo* pTargetFbo);
+    void renderRT(RenderContext* pRenderContext, const ref<Fbo>& pTargetFbo);
+
+    ref<Scene> mpScene;
+    ref<Camera> mpCamera;
+
+    ref<Program> mpRaytraceProgram;
+    ref<RtProgramVars> mpRtVars;
+    ref<Texture> mpRtOut;
+
+    bool mUseDOF = false;
+
+    uint32_t mSampleIndex = 0xdeadbeef;
 };
