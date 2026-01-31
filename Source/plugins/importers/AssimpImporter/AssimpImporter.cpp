@@ -48,6 +48,8 @@
 
 #include <execution>
 #include <fstream>
+#include <unordered_map>
+#include <unordered_set>
 
 namespace Falcor
 {
@@ -154,6 +156,12 @@ public:
     std::vector<MeshID> meshMap; // Assimp mesh index to Falcor mesh ID
     std::map<std::string, float4x4> localToBindPoseMatrices;
 
+    // Per Assimp mesh index: maps each processed mesh vertex back to indices into the original attribute streams.
+    // This is needed to correctly bake vertex-based animations into the final (post-processed) vertex layout.
+    std::vector<SceneBuilder::MeshAttributeIndices> meshAttributeIndices;
+    // Per Assimp mesh index: the processed mesh data (needed for fallback normals/tangents, final vertex count, etc.)
+    std::vector<SceneBuilder::ProcessedMesh> processedMeshes;
+
     NodeID getFalcorNodeID(const aiNode* pNode) const { return mAiToFalcorNodeID.at(pNode); }
 
     NodeID getFalcorNodeID(const std::string& aiNodeName, uint32_t index) const
@@ -227,7 +235,6 @@ void resetNegativeKeyframeTimes(aiNodeAnim* pAiNode)
 
 void createAnimation(ImporterData& data, const aiAnimation* pAiAnim, ImportMode importMode)
 {
-    FALCOR_ASSERT(pAiAnim->mNumMeshChannels == 0);
     double duration = pAiAnim->mDuration;
     double ticksPerSecond = pAiAnim->mTicksPerSecond ? pAiAnim->mTicksPerSecond : 25;
     // The GLTF2 importer in Assimp has a bug where duration and keyframe times are loaded as milliseconds instead of ticks.
@@ -286,6 +293,444 @@ void createAnimation(ImporterData& data, const aiAnimation* pAiAnim, ImportMode 
         }
     }
 }
+
+namespace
+{
+inline float4 makeTangent(const float3& T, const float3& B, const float3& N, float fallbackSign)
+{
+    float sign = fallbackSign;
+    if (length(T) > 0.f && length(B) > 0.f && length(N) > 0.f)
+    {
+        sign = dot(cross(N, T), B) >= 0.f ? 1.f : -1.f;
+    }
+    return float4(length(T) > 0.f ? normalize(T) : float3(0.f), sign);
+}
+
+struct AnimVertexStreams
+{
+    const aiVector3D* pPositions = nullptr;
+    const aiVector3D* pNormals = nullptr;
+    const aiVector3D* pTangents = nullptr;
+    const aiVector3D* pBitangents = nullptr;
+};
+
+AnimVertexStreams getHostStreams(const aiMesh* pMesh)
+{
+    AnimVertexStreams s;
+    s.pPositions = pMesh->mVertices;
+    s.pNormals = pMesh->mNormals;
+    s.pTangents = pMesh->mTangents;
+    s.pBitangents = pMesh->mBitangents;
+    return s;
+}
+
+AnimVertexStreams getAnimStreams(const aiMesh* pHost, const aiAnimMesh* pAnim)
+{
+    AnimVertexStreams s = getHostStreams(pHost);
+    if (!pAnim)
+        return s;
+    if (pAnim->mVertices)
+        s.pPositions = pAnim->mVertices;
+    if (pAnim->mNormals)
+        s.pNormals = pAnim->mNormals;
+    if (pAnim->mTangents)
+        s.pTangents = pAnim->mTangents;
+    if (pAnim->mBitangents)
+        s.pBitangents = pAnim->mBitangents;
+    return s;
+}
+
+std::vector<PackedStaticVertexData> bakeMeshKeyframe(
+    const aiMesh* pHost,
+    const AnimVertexStreams& streams,
+    const SceneBuilder::ProcessedMesh& processed,
+    const SceneBuilder::MeshAttributeIndices& attribIndices
+)
+{
+    const uint32_t vertexCount = (uint32_t)processed.staticData.size();
+    FALCOR_ASSERT(attribIndices.size() == processed.staticData.size());
+
+    std::vector<PackedStaticVertexData> out(vertexCount);
+    for (uint32_t i = 0; i < vertexCount; ++i)
+    {
+        const auto& baseV = processed.staticData[i];
+        const auto& idx = attribIndices[i];
+        const uint32_t src = idx.positionIdx; // Assimp streams are per-vertex for meshes we support.
+        FALCOR_ASSERT(src < pHost->mNumVertices);
+
+        StaticVertexData v;
+        v.position = streams.pPositions ? aiCast(streams.pPositions[src]) : baseV.position;
+
+        // Normals/tangents are optional in anim meshes. Fall back to processed base streams.
+        v.normal = streams.pNormals ? normalize(aiCast(streams.pNormals[src])) : baseV.normal;
+
+        if (streams.pTangents)
+        {
+            float3 T = aiCast(streams.pTangents[src]);
+            float3 B = streams.pBitangents ? aiCast(streams.pBitangents[src]) : float3(0.f);
+            v.tangent = makeTangent(T, B, v.normal, baseV.tangent.w);
+        }
+        else
+        {
+            v.tangent = baseV.tangent;
+        }
+
+        v.texCrd = float2(0.f);
+        v.curveRadius = 0.f;
+        out[i].pack(v);
+    }
+    return out;
+}
+
+std::vector<PackedStaticVertexData> bakeMorphKeyframe(
+    const aiMesh* pHost,
+    const aiMeshMorphKey& key,
+    const SceneBuilder::ProcessedMesh& processed,
+    const SceneBuilder::MeshAttributeIndices& attribIndices
+)
+{
+    const uint32_t hostVertexCount = pHost->mNumVertices;
+    const uint32_t outVertexCount = (uint32_t)processed.staticData.size();
+    FALCOR_ASSERT(attribIndices.size() == processed.staticData.size());
+
+    // Precompute blended per-host-vertex streams.
+    std::vector<float3> blendedPos(hostVertexCount);
+    std::vector<float3> blendedNrm;
+    std::vector<float3> blendedTan;
+    std::vector<float3> blendedBitan;
+
+    const bool hasHostNormals = pHost->mNormals != nullptr;
+    const bool hasHostTangents = pHost->mTangents != nullptr;
+    const bool hasHostBitangents = pHost->mBitangents != nullptr;
+
+    if (hasHostNormals)
+        blendedNrm.resize(hostVertexCount);
+    if (hasHostTangents)
+        blendedTan.resize(hostVertexCount);
+    if (hasHostBitangents)
+        blendedBitan.resize(hostVertexCount);
+
+    for (uint32_t v = 0; v < hostVertexCount; ++v)
+    {
+        const float3 basePos = aiCast(pHost->mVertices[v]);
+        blendedPos[v] = basePos;
+
+        if (hasHostNormals)
+            blendedNrm[v] = normalize(aiCast(pHost->mNormals[v]));
+        if (hasHostTangents)
+            blendedTan[v] = aiCast(pHost->mTangents[v]);
+        if (hasHostBitangents)
+            blendedBitan[v] = aiCast(pHost->mBitangents[v]);
+    }
+
+    // Blend using classic delta-from-base model: base + sum(w * (target - base)).
+    for (uint32_t k = 0; k < key.mNumValuesAndWeights; ++k)
+    {
+        const uint32_t animIndex = key.mValues[k];
+        const float w = (float)key.mWeights[k];
+        if (animIndex >= pHost->mNumAnimMeshes || w == 0.f)
+            continue;
+        const aiAnimMesh* pAnim = pHost->mAnimMeshes[animIndex];
+        if (!pAnim)
+            continue;
+
+        if (pAnim->mVertices)
+        {
+            for (uint32_t v = 0; v < hostVertexCount; ++v)
+            {
+                const float3 target = aiCast(pAnim->mVertices[v]);
+                const float3 base = aiCast(pHost->mVertices[v]);
+                blendedPos[v] += w * (target - base);
+            }
+        }
+
+        if (hasHostNormals && pAnim->mNormals)
+        {
+            for (uint32_t v = 0; v < hostVertexCount; ++v)
+            {
+                const float3 target = normalize(aiCast(pAnim->mNormals[v]));
+                const float3 base = normalize(aiCast(pHost->mNormals[v]));
+                blendedNrm[v] += w * (target - base);
+            }
+        }
+
+        if (hasHostTangents && pAnim->mTangents)
+        {
+            for (uint32_t v = 0; v < hostVertexCount; ++v)
+            {
+                const float3 target = aiCast(pAnim->mTangents[v]);
+                const float3 base = aiCast(pHost->mTangents[v]);
+                blendedTan[v] += w * (target - base);
+            }
+        }
+
+        if (hasHostBitangents && pAnim->mBitangents)
+        {
+            for (uint32_t v = 0; v < hostVertexCount; ++v)
+            {
+                const float3 target = aiCast(pAnim->mBitangents[v]);
+                const float3 base = aiCast(pHost->mBitangents[v]);
+                blendedBitan[v] += w * (target - base);
+            }
+        }
+    }
+
+    std::vector<PackedStaticVertexData> out(outVertexCount);
+    for (uint32_t i = 0; i < outVertexCount; ++i)
+    {
+        const auto& baseV = processed.staticData[i];
+        const uint32_t src = attribIndices[i].positionIdx;
+        FALCOR_ASSERT(src < hostVertexCount);
+
+        StaticVertexData v;
+        v.position = blendedPos[src];
+        v.normal = blendedNrm.empty() ? baseV.normal : normalize(blendedNrm[src]);
+
+        if (!blendedTan.empty())
+        {
+            float3 T = blendedTan[src];
+            float3 B = blendedBitan.empty() ? float3(0.f) : blendedBitan[src];
+            v.tangent = makeTangent(T, B, v.normal, baseV.tangent.w);
+        }
+        else
+        {
+            v.tangent = baseV.tangent;
+        }
+
+        v.texCrd = float2(0.f);
+        v.curveRadius = 0.f;
+        out[i].pack(v);
+    }
+
+    return out;
+}
+
+static void addMeshesByNodeName(const aiNode* pNode, std::unordered_map<std::string, std::vector<uint32_t>>& meshesByName)
+{
+    if (!pNode)
+        return;
+
+    const std::string nodeName = pNode->mName.C_Str();
+    // Only add nodes with a single mesh to avoid ambiguity.
+    if (pNode->mNumMeshes == 1 && meshesByName.find(nodeName) == meshesByName.end())
+    {
+        const uint32_t meshIndex = pNode->mMeshes[0];
+        meshesByName[nodeName].push_back(meshIndex);
+    }
+
+    for (uint32_t i = 0; i < pNode->mNumChildren; ++i)
+    {
+        addMeshesByNodeName(pNode->mChildren[i], meshesByName);
+    }
+}
+
+void createVertexCacheAnimations(
+    ImporterData& data,
+    const aiAnimation* pAiAnim,
+    ImportMode importMode,
+    std::unordered_set<uint32_t>& seenMeshes
+)
+{
+    double ticksPerSecond = pAiAnim->mTicksPerSecond ? pAiAnim->mTicksPerSecond : 25;
+    if (importMode == ImportMode::GLTF2)
+        ticksPerSecond = 1000.0;
+
+    // Build a lookup table meshName -> list of assimp mesh indices.
+    std::unordered_map<std::string, std::vector<uint32_t>> meshesByName;
+    meshesByName.reserve(data.pScene->mNumMeshes);
+    for (uint32_t meshIndex = 0; meshIndex < data.pScene->mNumMeshes; ++meshIndex)
+    {
+        logInfo(
+            "Processing vertex-cache animation for mesh {}/{}, name '{}'...",
+            meshIndex + 1,
+            data.pScene->mNumMeshes,
+            data.pScene->mMeshes[meshIndex]->mName.C_Str()
+        );
+        const aiMesh* pMesh = data.pScene->mMeshes[meshIndex];
+        if (!pMesh)
+            continue;
+        const char* n = pMesh->mName.C_Str();
+        if (!n || n[0] == '\0')
+            continue;
+        meshesByName[n].push_back(meshIndex);
+    }
+
+    // Some animated meshes are referred by node name,
+    // iterate over nodes with single mesh instance to find those names.
+    addMeshesByNodeName(data.pScene->mRootNode, meshesByName);
+
+    auto tryAddCacheForMesh =
+        [&](uint32_t assimpMeshIndex, std::vector<double>&& timeSamples, std::vector<std::vector<PackedStaticVertexData>>&& frames)
+    {
+        MeshID meshID = data.meshMap[assimpMeshIndex];
+        if (!meshID.isValid())
+            return;
+        const uint32_t meshKey = meshID.get();
+        if (seenMeshes.find(meshKey) != seenMeshes.end())
+        {
+            logWarning(
+                "AssimpImporter: Mesh '{}' has multiple vertex-animation clips/channels; keeping the first one.",
+                data.pScene->mMeshes[assimpMeshIndex]->mName.C_Str()
+            );
+            return;
+        }
+
+        if (timeSamples.empty() || frames.empty())
+            return;
+        if (timeSamples.size() != frames.size())
+            return;
+
+        CachedMesh cache;
+        cache.meshID = meshID;
+        cache.timeSamples = std::move(timeSamples);
+        cache.vertexData = std::move(frames);
+        data.builder.addCachedMesh(std::move(cache));
+        seenMeshes.insert(meshKey);
+    };
+
+    // Vertex-cache (aiMeshAnim) channels.
+    for (uint32_t c = 0; c < pAiAnim->mNumMeshChannels; ++c)
+    {
+        const aiMeshAnim* pChan = pAiAnim->mMeshChannels[c];
+        if (!pChan)
+            continue;
+        const std::string name = pChan->mName.C_Str();
+        if (name.empty())
+        {
+            logWarning("AssimpImporter: Encountered mesh animation channel with empty mesh name; skipping.");
+            continue;
+        }
+
+        auto it = meshesByName.find(name);
+        if (it == meshesByName.end())
+        {
+            logWarning("AssimpImporter: Mesh animation channel targets mesh '{}' which wasn't found; skipping.", name);
+            continue;
+        }
+
+        for (uint32_t assimpMeshIndex : it->second)
+        {
+            const aiMesh* pHost = data.pScene->mMeshes[assimpMeshIndex];
+            if (!pHost || pHost->mNumAnimMeshes == 0 || !pHost->mAnimMeshes)
+                continue;
+
+            const auto& processed = data.processedMeshes[assimpMeshIndex];
+            const auto& attrib = data.meshAttributeIndices[assimpMeshIndex];
+            if (processed.staticData.empty() || attrib.empty())
+                continue;
+
+            std::vector<std::pair<double, uint32_t>> keys;
+            keys.reserve(pChan->mNumKeys);
+            for (uint32_t k = 0; k < pChan->mNumKeys; ++k)
+            {
+                const aiMeshKey& mk = pChan->mKeys[k];
+                keys.push_back({mk.mTime / ticksPerSecond, mk.mValue});
+            }
+            std::sort(keys.begin(), keys.end(), [](auto& a, auto& b) { return a.first < b.first; });
+
+            std::vector<double> timeSamples;
+            std::vector<std::vector<PackedStaticVertexData>> frames;
+            timeSamples.reserve(keys.size());
+            frames.reserve(keys.size());
+
+            for (auto& kv : keys)
+            {
+                const double t = kv.first;
+                const uint32_t animIndex = kv.second;
+                if (animIndex >= pHost->mNumAnimMeshes)
+                {
+                    logWarning(
+                        "AssimpImporter: Mesh '{}' references anim mesh index {} out of range ({}).", name, animIndex, pHost->mNumAnimMeshes
+                    );
+                    continue;
+                }
+
+                const aiAnimMesh* pAnim = pHost->mAnimMeshes[animIndex];
+                AnimVertexStreams streams = getAnimStreams(pHost, pAnim);
+                auto baked = bakeMeshKeyframe(pHost, streams, processed, attrib);
+
+                if (!timeSamples.empty() && t == timeSamples.back())
+                {
+                    // If multiple keys share the same time, keep the last one.
+                    frames.back() = std::move(baked);
+                }
+                else
+                {
+                    timeSamples.push_back(t);
+                    frames.push_back(std::move(baked));
+                }
+            }
+
+            tryAddCacheForMesh(assimpMeshIndex, std::move(timeSamples), std::move(frames));
+        }
+    }
+
+    // Morph (aiMeshMorphAnim) channels.
+    for (uint32_t c = 0; c < pAiAnim->mNumMorphMeshChannels; ++c)
+    {
+        const aiMeshMorphAnim* pChan = pAiAnim->mMorphMeshChannels[c];
+        if (!pChan)
+            continue;
+        const std::string name = pChan->mName.C_Str();
+        if (name.empty())
+        {
+            logWarning("AssimpImporter: Encountered morph mesh animation channel with empty mesh name; skipping.");
+            continue;
+        }
+
+        auto it = meshesByName.find(name);
+        if (it == meshesByName.end())
+        {
+            logWarning("AssimpImporter: Morph mesh animation channel targets mesh '{}' which wasn't found; skipping.", name);
+            continue;
+        }
+
+        for (uint32_t assimpMeshIndex : it->second)
+        {
+            const aiMesh* pHost = data.pScene->mMeshes[assimpMeshIndex];
+            if (!pHost || pHost->mNumAnimMeshes == 0 || !pHost->mAnimMeshes)
+                continue;
+
+            const auto& processed = data.processedMeshes[assimpMeshIndex];
+            const auto& attrib = data.meshAttributeIndices[assimpMeshIndex];
+            if (processed.staticData.empty() || attrib.empty())
+                continue;
+
+            std::vector<std::pair<double, const aiMeshMorphKey*>> keys;
+            keys.reserve(pChan->mNumKeys);
+            for (uint32_t k = 0; k < pChan->mNumKeys; ++k)
+            {
+                keys.push_back({pChan->mKeys[k].mTime / ticksPerSecond, &pChan->mKeys[k]});
+            }
+            std::sort(keys.begin(), keys.end(), [](auto& a, auto& b) { return a.first < b.first; });
+
+            std::vector<double> timeSamples;
+            std::vector<std::vector<PackedStaticVertexData>> frames;
+            timeSamples.reserve(keys.size());
+            frames.reserve(keys.size());
+
+            for (auto& kv : keys)
+            {
+                const double t = kv.first;
+                const aiMeshMorphKey& mk = *kv.second;
+                auto baked = bakeMorphKeyframe(pHost, mk, processed, attrib);
+
+                if (!timeSamples.empty() && t == timeSamples.back())
+                {
+                    frames.back() = std::move(baked);
+                }
+                else
+                {
+                    timeSamples.push_back(t);
+                    frames.push_back(std::move(baked));
+                }
+            }
+
+            tryAddCacheForMesh(assimpMeshIndex, std::move(timeSamples), std::move(frames));
+        }
+    }
+}
+} // namespace
 
 /**
  * The current version of AssImp (5.2.5) has a bug where it creates an invalid
@@ -446,8 +891,13 @@ void createLights(ImporterData& data)
 
 void createAnimations(ImporterData& data, ImportMode importMode)
 {
+    std::unordered_set<uint32_t> seenMeshes;
     for (uint32_t i = 0; i < data.pScene->mNumAnimations; i++)
-        createAnimation(data, data.pScene->mAnimations[i], importMode);
+    {
+        const aiAnimation* pAnim = data.pScene->mAnimations[i];
+        createAnimation(data, pAnim, importMode);
+        createVertexCacheAnimations(data, pAnim, importMode, seenMeshes);
+    }
 }
 
 void createTexCrdList(const aiVector3D* pAiTexCrd, uint32_t count, std::vector<float2>& texCrds)
@@ -587,7 +1037,9 @@ void createMeshes(ImporterData& data)
     }
 
     // Pre-process meshes.
-    std::vector<SceneBuilder::ProcessedMesh> processedMeshes(meshes.size());
+    data.processedMeshes.resize(meshes.size());
+    data.meshAttributeIndices.resize(meshes.size());
+
     auto range = NumericRange<size_t>(0, meshes.size());
     std::for_each(
         std::execution::par,
@@ -655,7 +1107,12 @@ void createMeshes(ImporterData& data)
 
             mesh.pMaterial = data.materialMap.at(pAiMesh->mMaterialIndex);
 
-            processedMeshes[i] = data.builder.processMesh(mesh);
+            SceneBuilder::MeshAttributeIndices attrib;
+            std::vector<float4> generatedTangents;
+            auto processed = data.builder.processMesh(mesh, &attrib, &generatedTangents);
+
+            data.processedMeshes[i] = std::move(processed);
+            data.meshAttributeIndices[i] = std::move(attrib);
         }
     );
 
@@ -663,12 +1120,12 @@ void createMeshes(ImporterData& data)
     // We retain a deterministic order of the meshes in the global scene buffer by adding
     // them sequentially after being processed in parallel.
     data.meshMap.clear();
-    data.meshMap.resize(processedMeshes.size(), MeshID::Invalid());
-    for (size_t i = 0; i < processedMeshes.size(); ++i)
+    data.meshMap.resize(data.processedMeshes.size(), MeshID::Invalid());
+    for (size_t i = 0; i < data.processedMeshes.size(); ++i)
     {
         if (!meshes[i])
             continue;
-        data.meshMap[i] = data.builder.addProcessedMesh(processedMeshes[i]);
+        data.meshMap[i] = data.builder.addProcessedMesh(data.processedMeshes[i]);
     }
 }
 
@@ -1118,7 +1575,7 @@ void importInternal(const void* buffer, size_t byteSize, const std::filesystem::
     TimeReport timeReport;
 
     const SceneBuilder::Flags builderFlags = builder.getFlags();
-    uint32_t assimpFlags = aiProcessPreset_TargetRealtime_MaxQuality | aiProcess_FlipUVs | aiProcess_RemoveComponent;
+    uint32_t assimpFlags = aiProcessPreset_TargetRealtime_MaxQuality | aiProcess_FlipUVs | aiProcess_RemoveComponent | aiProcess_TransformUVCoords; // Pretransform UVs
 
     assimpFlags &= ~(aiProcess_CalcTangentSpace);         // Never use Assimp's tangent gen code
     assimpFlags &= ~(aiProcess_FindDegenerates);          // Avoid converting degenerated triangles to lines

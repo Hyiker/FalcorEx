@@ -213,7 +213,14 @@ namespace Falcor
         }
 
         bool changed = false;
-        double time = mLoopAnimations ? std::fmod(currentTime, mGlobalAnimationLength) : currentTime;
+
+        // If there are no node-based animations, mGlobalAnimationLength can be 0.
+        // Avoid std::fmod(x, 0) which yields NaNs and breaks incremental update logic.
+        double time = currentTime;
+        if (mLoopAnimations && mGlobalAnimationLength > 0.0)
+        {
+            time = std::fmod(currentTime, mGlobalAnimationLength);
+        }
 
         // Check if animation controller was enabled/disabled since last call.
         // When enabling/disabling, all data for the current and previous frame is initialized,
