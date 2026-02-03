@@ -540,12 +540,6 @@ void createVertexCacheAnimations(
     meshesByName.reserve(data.pScene->mNumMeshes);
     for (uint32_t meshIndex = 0; meshIndex < data.pScene->mNumMeshes; ++meshIndex)
     {
-        logInfo(
-            "Processing vertex-cache animation for mesh {}/{}, name '{}'...",
-            meshIndex + 1,
-            data.pScene->mNumMeshes,
-            data.pScene->mMeshes[meshIndex]->mName.C_Str()
-        );
         const aiMesh* pMesh = data.pScene->mMeshes[meshIndex];
         if (!pMesh)
             continue;

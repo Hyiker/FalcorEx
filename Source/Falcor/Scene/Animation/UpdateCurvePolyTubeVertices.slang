@@ -95,7 +95,8 @@ struct CurvePolyTubeVertexUpdater
             uint globalMeshVertexIndex = meshMeta.sceneVbOffset + meshVertexIndex;
             uint globalPrevVertexIndex = meshMeta.prevVbOffset + meshVertexIndex;
 
-            StaticVertexData meshVertex = sceneVertexData[globalMeshVertexIndex].unpack();
+            // StaticVertexData meshVertex = sceneVertexData[globalMeshVertexIndex].unpack();
+            StaticVertexData meshVertex = getRWSplitVertexBufferElement(sceneVertexData, globalMeshVertexIndex).unpack();
 
             prevVertexData[globalPrevVertexIndex].position = meshVertex.position;
         }
@@ -124,7 +125,7 @@ struct CurvePolyTubeVertexUpdater
             uint globalMeshVertexIndex = meshMeta.sceneVbOffset + meshVertexIndex;
             uint globalPrevVertexIndex = meshMeta.prevVbOffset + meshVertexIndex;
 
-            StaticVertexData meshVertex = sceneVertexData[globalMeshVertexIndex].unpack();
+            StaticVertexData meshVertex = getRWSplitVertexBufferElement(sceneVertexData, globalMeshVertexIndex).unpack();
 
             prevVertexData[globalPrevVertexIndex].position = meshVertex.position;
 
@@ -141,7 +142,7 @@ struct CurvePolyTubeVertexUpdater
                 meshVertex.position = curCurvePos;
             }
 
-            sceneVertexData[globalMeshVertexIndex].pack(meshVertex);
+            setRWSplitVertexBufferElement(sceneVertexData, globalMeshVertexIndex, meshVertex);
         }
     }
 };

@@ -68,7 +68,7 @@ struct MeshVertexUpdater
         if (meshVertexID >= meta.vertexCount) return;
 
         uint outVertexID = meta.sceneVbOffset + meshVertexID;
-        StaticVertexData orig = sceneVertexData[outVertexID].unpack();
+        StaticVertexData orig = getRWSplitVertexBufferElement(sceneVertexData, outVertexID).unpack();
         uint prevVertexID = meta.prevVbOffset + meshVertexID;
 
         if (copyPrev)
@@ -87,7 +87,7 @@ struct MeshVertexUpdater
         prevVertexData[prevVertexID].position = orig.position;
 
         result.texCrd = orig.texCrd; // Same
-        sceneVertexData[outVertexID].pack(result);
+        setRWSplitVertexBufferElement(sceneVertexData, outVertexID, result);
     }
 };
 

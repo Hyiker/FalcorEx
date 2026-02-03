@@ -265,9 +265,9 @@ public:
     /// Binds the SplitBuffer to the corresponding GPU type
     void bindShaderData(const ShaderVar& var) const
     {
-        static const std::string kDataStr = "data";
+        // static const std::string kDataStr = "data";
         for (size_t i = 0; i < mGpuBuffers.size(); ++i)
-            var[kDataStr][i] = mGpuBuffers[i];
+            var[i] = mGpuBuffers[i];
     }
 
 private:

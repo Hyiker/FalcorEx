@@ -403,6 +403,8 @@ inline ShaderModel querySupportedShaderModel(gfx::IDevice* pDevice)
         ShaderModel level;
     };
     const SMLevel levels[] = {
+        {"sm_6_9", ShaderModel::SM6_9},
+        {"sm_6_8", ShaderModel::SM6_8},
         {"sm_6_7", ShaderModel::SM6_7},
         {"sm_6_6", ShaderModel::SM6_6},
         {"sm_6_5", ShaderModel::SM6_5},

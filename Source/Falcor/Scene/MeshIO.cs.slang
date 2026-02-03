@@ -80,7 +80,7 @@ struct MeshUpdater
         vtxData.normal = normals[vertexId];
         vtxData.tangent = float4(tangents[vertexId], 1.f); // Tangent follows the orientation such that `b = cross(n, t)`.
         vtxData.texCrd = texcrds[vertexId].xy;
-        vertexData[vertexId + vbOffset].pack(vtxData);
+        setRWSplitVertexBufferElement(vertexData, vertexId + vbOffset, vtxData);
     }
 };
 

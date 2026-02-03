@@ -128,13 +128,14 @@ struct SkinningData
 
     void storeSkinnedVertexData(uint vertexId, StaticVertexData data, PrevVertexData prevData)
     {
-        gData.skinnedVertices[getStaticVertexID(vertexId)].pack(data);
+        setRWSplitVertexBufferElement(skinnedVertices, getStaticVertexID(vertexId), data);
+
         gData.prevSkinnedVertices[vertexId] = prevData;
     }
 
     float3 getCurrentPosition(uint vertexId)
     {
-        return gData.skinnedVertices[getStaticVertexID(vertexId)].position;
+        return getRWSplitVertexBufferElement(skinnedVertices, getStaticVertexID(vertexId)).unpack().position;
     }
 };
 
