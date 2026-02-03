@@ -50,14 +50,14 @@ struct ShadingData : IDifferentiable
     float3  V;                          ///< View direction, -incident direction (-ray.dir)
     float2  uv;                         ///< Texture mapping coordinates.
 
-    ShadingFrame frame;                 ///< Smooth interpolated shading frame in world space at the shading point. The normal is *not* automatically flipped for backfacing hits.
+    ShadingFrame frame = {};                 ///< Smooth interpolated shading frame in world space at the shading point. The normal is *not* automatically flipped for backfacing hits.
     no_diff float3  faceN;              ///< Face normal in world space, always on the front-facing side.
     no_diff float4  tangentW;           ///< Geometric tangent (xyz) and sign (w) in world space. This is used for orthogonalization. Not normalized, but it is guaranteed to be nonzero and sign (w) is +-1.0.
     bool            frontFacing;        ///< True if primitive seen from the front-facing side, i.e., dot(V, faceN) >= 0.0.
     no_diff float   curveRadius;        ///< Curve cross-sectional radius. Valid only for geometry generated from curves.
 
     // Material data
-    MaterialHeader mtl;                 ///< Material header data.
+    MaterialHeader mtl = {};                 ///< Material header data.
     uint    materialID;                 ///< Material ID at shading location.
     float   IoR;                        ///< Index of refraction for the medium on the front-facing side (i.e. "outside" the material at the hit).
 

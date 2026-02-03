@@ -72,7 +72,7 @@ struct StandardBSDFData : IDifferentiable
     bool hasSigmaSGreaterZero;          ///< Flag that indicates if we have to do albedo conversion
 
     [Differentiable]
-    __init(const DiffMaterialData diffData)
+    __init(const DiffMaterialData diffData = {})
     {
         uint offset = 0;
         diffData.read(diffuse, offset);

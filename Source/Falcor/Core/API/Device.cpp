@@ -500,8 +500,7 @@ Device::Device(const Desc& desc) : mDesc(desc)
 
     // Setup debug layer.
     FALCOR_GFX_CALL(gfxSetDebugCallback(&gGFXDebugCallBack));
-    if (mDesc.enableDebugLayer)
-        gfx::gfxEnableDebugLayer();
+    gfx::gfxEnableDebugLayer(mDesc.enableDebugLayer);
 
     // Get list of available GPUs.
     const auto gpus = getGPUs(mDesc.type);

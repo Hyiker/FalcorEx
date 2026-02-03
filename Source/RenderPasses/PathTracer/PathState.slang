@@ -85,8 +85,8 @@ struct PathState
 
     uint        flagsAndVertexIndex;    ///< Higher kPathFlagsBitCount bits: Flags indicating the current status. This can be multiple PathFlags flags OR'ed together.
                                         ///< Lower kVertexIndexBitCount bits: Current vertex index (0 = camera, 1 = primary hit, 2 = secondary hit, etc.).
-    uint16_t    rejectedHits;           ///< Number of false intersections rejected along the path. This is used as a safeguard to avoid deadlock in pathological cases.
-    float16_t   sceneLength;            ///< Path length in scene units (0.f at primary hit).
+    uint16_t    rejectedHits = {};           ///< Number of false intersections rejected along the path. This is used as a safeguard to avoid deadlock in pathological cases.
+    float16_t   sceneLength = {};            ///< Path length in scene units (0.f at primary hit).
     uint        bounceCounters;         ///< Packed counters for different types of bounces (see BounceType).
 
     // Scatter ray
@@ -99,9 +99,9 @@ struct PathState
     float3      thp;                    ///< Path throughput.
     float3      L;                      ///< Accumulated path contribution.
 
-    GuideData   guideData;              ///< Denoiser guide data.
-    InteriorList interiorList;          ///< Interior list. Keeping track of a stack of materials with medium properties.
-    SampleGenerator sg;                 ///< Sample generator state. Typically 4-16B.
+    GuideData guideData = {};              ///< Denoiser guide data.
+    InteriorList interiorList = {};          ///< Interior list. Keeping track of a stack of materials with medium properties.
+    SampleGenerator sg = {};                 ///< Sample generator state. Typically 4-16B.
 
     // Accessors
 

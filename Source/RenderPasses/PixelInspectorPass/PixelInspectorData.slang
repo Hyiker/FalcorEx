@@ -84,8 +84,6 @@ struct PixelData
 #ifndef HOST_CODE
     __init()
     {
-        this = {};
-
         // V-buffer data.
         hitType = (uint)HitType::Triangle;
         instanceID = kInvalidIndex;

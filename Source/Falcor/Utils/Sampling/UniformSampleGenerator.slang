@@ -45,6 +45,8 @@ export struct UniformSampleGenerator : ISampleGenerator
         UniformSampleGenerator internal;
     }
 
+    __init() { rng = {}; }
+
     /**
      * Initializes the sample generator for a given pixel and sample number.
      * @param[in] pixel Pixel id.

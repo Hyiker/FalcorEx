@@ -44,7 +44,7 @@ struct ShadingFrame : IDifferentiable
      * @param[in] Target tangent in world space (xyz) and handedness sign (w). Not normalized.
      */
     [Differentiable]
-    __init(const float3 normalW, const float4 tangentW)
+    __init(const float3 normalW = {}, const float4 tangentW = {})
     {
         this.N = normalize(normalW);
         orthonormalize(tangentW);

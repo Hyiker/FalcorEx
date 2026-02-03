@@ -55,7 +55,7 @@ struct GeometryInstanceID
         \param[in] instanceID The DXR InstanceID() system value.
         \param[in] geometryIndex The DXR GeometryIndex() system value.
     */
-    __init(uint instanceID, uint geometryIndex) { index = instanceID + geometryIndex; }
+    __init(uint instanceID = {}, uint geometryIndex = {}) { index = instanceID + geometryIndex; }
 #endif
 };
 

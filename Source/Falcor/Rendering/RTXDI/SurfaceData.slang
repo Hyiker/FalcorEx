@@ -92,7 +92,6 @@ struct SurfaceData
     */
     __init()
     {
-        this = {};
         viewDepth = -1.f;
     }
 
