@@ -52,13 +52,13 @@
 
 #if FALCOR_HAS_D3D12
 #include "Core/API/Shared/D3D12DescriptorPool.h"
+#include <d3d12.h>
 #endif
 
 #if FALCOR_NVAPI_AVAILABLE
 #include "Core/API/NvApiExDesc.h"
 #include <nvShaderExtnEnums.h> // Required for checking SER support.
 #endif
-
 
 #include <algorithm>
 namespace Falcor
@@ -391,7 +391,6 @@ inline Device::SupportedFeatures querySupportedFeatures(gfx::IDevice* pDevice)
         result |= Device::SupportedFeatures::WaveOperations;
     }
 
-
     return result;
 }
 
@@ -455,6 +454,17 @@ Device::Device(const Desc& desc) : mDesc(desc)
     gfx::IDevice::Desc gfxDesc = {};
     gfxDesc.deviceType = getGfxDeviceType(mDesc.type);
     gfxDesc.slang.slangGlobalSession = mSlangGlobalSession;
+    if (mDesc.type == Type::Vulkan)
+    {
+        gfxDesc.slang.targetProfile = "spirv_1_6";
+    }
+#if FALCOR_HAS_D3D12
+    else if (mDesc.type == Type::D3D12)
+    {
+        mDesc.experimentalFeatures.push_back(D3D12CooperativeVectorExperiment);
+        mDesc.experimentalFeatures.push_back(D3D12ExperimentalShaderModels);
+    }
+#endif
 
     // Setup shader cache.
     gfxDesc.shaderCache.maxEntryCount = mDesc.maxShaderCacheEntryCount;
@@ -519,16 +529,18 @@ Device::Device(const Desc& desc) : mDesc(desc)
     // Try to create device on specific GPU.
     {
         gfxDesc.adapterLUID = reinterpret_cast<const gfx::AdapterLUID*>(&gpus[mDesc.gpu].luid);
-        if (SLANG_FAILED(gfxCreateDevice(&gfxDesc, mGfxDevice.writeRef())))
-            logWarning("Failed to create device on GPU {} ({}).", mDesc.gpu, gpus[mDesc.gpu].name);
+        if (auto status = gfxCreateDevice(&gfxDesc, mGfxDevice.writeRef()); SLANG_FAILED(status))
+            logWarning(
+                "Failed to create device on GPU {} ({}). Errcode: {:#x}", mDesc.gpu, gpus[mDesc.gpu].name, SLANG_GET_RESULT_CODE(status)
+            );
     }
 
     // Otherwise try create device on any available GPU.
     if (!mGfxDevice)
     {
         gfxDesc.adapterLUID = nullptr;
-        if (SLANG_FAILED(gfxCreateDevice(&gfxDesc, mGfxDevice.writeRef())))
-            FALCOR_THROW("Failed to create device");
+        if (auto status = gfxCreateDevice(&gfxDesc, mGfxDevice.writeRef()); SLANG_FAILED(status))
+            FALCOR_THROW("Failed to create device: {:#x}", SLANG_GET_RESULT_CODE(status));
     }
 
     const auto& deviceInfo = mGfxDevice->getDeviceInfo();
@@ -716,7 +728,6 @@ Device::~Device()
     mpProgramManager.reset();
 
     mDeferredReleases = decltype(mDeferredReleases)();
-
 
     mGfxDevice.setNull();
 
@@ -1068,7 +1079,6 @@ cuda_utils::CudaDevice* Device::getCudaDevice() const
 }
 
 #endif
-
 
 void Device::reportLiveObjects()
 {

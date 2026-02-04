@@ -22,7 +22,7 @@
     </dependency>
     <remote name="github-slang" type="https" packageLocation="github.com/shader-slang/slang/releases/download/v${version}/slang-${version}-${platform}.zip"/>
     <dependency name="slang" linkPath="external/packman/slang">
-        <package name="slang" version="2025.10" remotes="github-slang" platforms="windows-x86_64 linux-x86_64"/>
+        <package name="slang" version="2025.14" remotes="github-slang" platforms="windows-x86_64 linux-x86_64"/>
     </dependency>
     <remote name="github-assimp-windows" type="https" packageLocation="github.com/Hyiker/assimp/releases/download/v${version}/windows-x64.zip"/>
     <dependency name="assimp" linkPath="external/packman/assimp">
@@ -37,11 +37,12 @@
     <dependency name="nanovdb" linkPath="external/packman/nanovdb">
         <package name="nanovdb" version="32.3.3-37-${platform}-release" platforms="windows-x86_64 linux-x86_64" />
     </dependency>
+    <remote name="cf-deps" type="https" packageLocation="deps.carbene.cc/falcorex/${name}.${version}.zip"/>
     <dependency name="dxcompiler" linkPath="external/packman/dxcompiler">
-        <package name="dxcompiler" version="1.7.2207" platforms="windows-x86_64" />
+        <package name="dxc" version="1.8.2505.28" platforms="windows-x86_64" remotes="cf-deps" />
     </dependency>
     <dependency name="agility-sdk" linkPath="external/packman/agility-sdk">
-        <package name="agility-sdk" version="1.4.10" platforms="windows-x86_64"/>
+        <package name="agility-sdk" version="1.717.0-preview" platforms="windows-x86_64" remotes="cf-deps" />
     </dependency>
     <dependency name="nvtt" linkPath="external/packman/nvtt">
         <package name="nvtt" version="3.1.6-${platform}" platforms="windows-x86_64 linux-x86_64" />
